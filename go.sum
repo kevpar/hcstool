@@ -1,0 +1,4 @@
+github.com/kevpar/repl-go v0.0.0-20231030174411-ed82b598138e h1:fgEFlacqxf6teBBkZqTYwOtwG0vtZo0Q21tDGiU/UXQ=
+github.com/kevpar/repl-go v0.0.0-20231030174411-ed82b598138e/go.mod h1:5xlrHbVujaftA4hqK4AaKLVJk4MkRjPTLWepwCX/Cho=
+golang.org/x/sys v0.13.0 h1:Af8nKPmuFypiUBjVoU9V20FiaFXOcuZI21p0ycVYYGE=
+golang.org/x/sys v0.13.0/go.mod h1:oPkhp1MJrh7nUepCBck5+mAzfO9JrbApNNgaTdGDITg=
