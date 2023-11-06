@@ -381,16 +381,93 @@ func (c *defaultCommand) Execute(state *state, fs *flag.FlagSet) error {
 	return nil
 }
 
-type listCommand struct{}
+type listCommand struct{ all *bool }
 
-func (c *listCommand) Name() string                { return "list" }
-func (c *listCommand) Description() string         { return "Lists compute systems." }
-func (c *listCommand) ArgHelp() string             { return "" }
-func (c *listCommand) SetupFlags(fs *flag.FlagSet) {}
+func (c *listCommand) Name() string        { return "list" }
+func (c *listCommand) Description() string { return "Lists compute systems." }
+func (c *listCommand) ArgHelp() string     { return "" }
+func (c *listCommand) SetupFlags(fs *flag.FlagSet) {
+	c.all = fs.Bool("all", false, "Show all systems instead of only those you have open.")
+}
 
 func (c *listCommand) Execute(state *state, fs *flag.FlagSet) error {
-	for id := range state.systems {
-		fmt.Printf("%s\n", id)
+	if *c.all {
+		var (
+			systemsRaw *uint16
+			result     *uint16
+		)
+		if err := vmcompute.HcsEnumerateComputeSystems("", &systemsRaw, &result); err != nil {
+			return err
+		}
+		type systemData struct {
+			ID         string `json:"Id"`
+			Name       string
+			SystemType string
+			Owner      string
+		}
+		var systems []systemData
+		if err := json.Unmarshal([]byte(windows.UTF16PtrToString(systemsRaw)), &systems); err != nil {
+			return err
+		}
+		if err := printTable(
+			[]colInfo{{"ID", "%s"}, {"NAME", "%s"}, {"TYPE", "%s"}, {"OWNER", "%s"}},
+			systems,
+			func(rd systemData) []any { return []any{rd.ID, rd.Name, rd.SystemType, rd.Owner} },
+		); err != nil {
+			return err
+		}
+	} else {
+		for id := range state.systems {
+			fmt.Printf("%s\n", id)
+		}
+	}
+	return nil
+}
+
+type colInfo struct {
+	header string
+	format string
+}
+
+func printTable[T any](colInfo []colInfo, rowData []T, rowExtract func(T) []any) error {
+	var (
+		cols = len(colInfo)
+		max  = make([]int, 0, cols)
+		data = make([][]string, 0, len(rowData))
+	)
+	for _, ci := range colInfo {
+		max = append(max, len(ci.header))
+	}
+	for _, rd := range rowData {
+		d := rowExtract(rd)
+		if len(d) != cols {
+			return fmt.Errorf("row did not match header column count")
+		}
+		values := make([]string, 0, cols)
+		for i := 0; i < cols; i++ {
+			s := fmt.Sprintf(colInfo[i].format, d[i])
+			if l := len(s); l > max[i] {
+				max[i] = l
+			}
+			values = append(values, s)
+		}
+		data = append(data, values)
+	}
+	for i := range colInfo {
+		if i > 0 {
+			fmt.Printf(" ")
+		}
+		fmt.Printf("%[1]*[2]s", max[i], colInfo[i].header)
+	}
+	fmt.Printf("\n")
+	for _, d := range data {
+		for i := range d {
+			if i > 0 {
+				fmt.Printf(" ")
+			}
+			fmt.Printf("%[1]*[2]s", max[i], d[i])
+		}
+		fmt.Printf("\n")
 	}
 	return nil
 }
