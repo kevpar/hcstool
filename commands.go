@@ -28,6 +28,7 @@ func allCommands() []repl.Command[*state] {
 		&grantCommand{},
 		&defaultCommand{},
 		&listCommand{},
+		&openCommand{},
 	}
 }
 
@@ -75,7 +76,7 @@ func (c *createCommand) SetupFlags(fs *flag.FlagSet) {}
 func (c *createCommand) Execute(state *state, fs *flag.FlagSet) error {
 	id := fs.Arg(0)
 	if _, ok := state.systems[id]; ok {
-		return fmt.Errorf("compute system already exists: %s", id)
+		return fmt.Errorf("compute system already open: %s", id)
 	}
 	var cs cs
 	doc, err := os.ReadFile(fs.Arg(1))
@@ -421,6 +422,33 @@ func (c *listCommand) Execute(state *state, fs *flag.FlagSet) error {
 			fmt.Printf("%s\n", id)
 		}
 	}
+	return nil
+}
+
+type openCommand struct{}
+
+func (c *openCommand) Name() string                { return "open" }
+func (c *openCommand) Description() string         { return "Opens a compute systems." }
+func (c *openCommand) ArgHelp() string             { return "ID" }
+func (c *openCommand) SetupFlags(fs *flag.FlagSet) {}
+
+func (c *openCommand) Execute(state *state, fs *flag.FlagSet) error {
+	id := fs.Arg(0)
+	if _, ok := state.systems[id]; ok {
+		return fmt.Errorf("compute system already open: %s", id)
+	}
+	var (
+		cs     cs
+		result *uint16
+	)
+	if err := vmcompute.HcsOpenComputeSystem(id, &cs.handle, &result); err != nil {
+		return err
+	}
+	if err := vmcompute.HcsRegisterComputeSystemCallback(cs.handle, syscall.NewCallback(computeSystemCallback), 0, &cs.callback); err != nil {
+		return err
+	}
+	cs.ch = make(chan *hcsNotification)
+	state.systems[id] = &cs
 	return nil
 }
 
