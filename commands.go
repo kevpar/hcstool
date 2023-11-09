@@ -285,12 +285,18 @@ func (c *saveCommand) Execute(state *state, fs *flag.FlagSet) error {
 	return nil
 }
 
-type propsCommand struct{ cf commonFlags }
+type propsCommand struct {
+	cf        commonFlags
+	vmVersion *bool
+}
 
-func (c *propsCommand) Name() string                { return "props" }
-func (c *propsCommand) Description() string         { return "Lists compute system properties." }
-func (c *propsCommand) ArgHelp() string             { return "" }
-func (c *propsCommand) SetupFlags(fs *flag.FlagSet) { setupCommonFlags(&c.cf, fs) }
+func (c *propsCommand) Name() string        { return "props" }
+func (c *propsCommand) Description() string { return "Lists compute system properties." }
+func (c *propsCommand) ArgHelp() string     { return "" }
+func (c *propsCommand) SetupFlags(fs *flag.FlagSet) {
+	setupCommonFlags(&c.cf, fs)
+	c.vmVersion = fs.Bool("vmversion", false, "Query for VmVersion property as well.")
+}
 
 func (c *propsCommand) Execute(state *state, fs *flag.FlagSet) error {
 	_, cs, err := getCS(state, &c.cf)
@@ -299,9 +305,11 @@ func (c *propsCommand) Execute(state *state, fs *flag.FlagSet) error {
 	}
 	pq := hcsschema.PropertyQuery{
 		Queries: map[string]interface{}{
-			"Basic":     nil,
-			"VmVersion": nil,
+			"Basic": nil,
 		},
+	}
+	if *c.vmVersion {
+		pq.Queries["VmVersion"] = nil
 	}
 	j, err := json.Marshal(pq)
 	if err != nil {
