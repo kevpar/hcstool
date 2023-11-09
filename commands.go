@@ -29,6 +29,7 @@ func allCommands() []repl.Command[*state] {
 		&defaultCommand{},
 		&listCommand{},
 		&openCommand{},
+		&svcPropsCommand{},
 	}
 }
 
@@ -460,6 +461,68 @@ func (c *openCommand) Execute(state *state, fs *flag.FlagSet) error {
 	}
 	cs.ch = make(chan *hcsNotification)
 	state.systems[id] = &cs
+	return nil
+}
+
+type svcPropsCommand struct{}
+
+func (c *svcPropsCommand) Name() string                { return "svcprops" }
+func (c *svcPropsCommand) Description() string         { return "Lists HCS service properties." }
+func (c *svcPropsCommand) ArgHelp() string             { return "" }
+func (c *svcPropsCommand) SetupFlags(fs *flag.FlagSet) {}
+
+func (c *svcPropsCommand) Execute(state *state, fs *flag.FlagSet) error {
+	pq := struct {
+		PropertyQueries map[string]any
+	}{
+		PropertyQueries: map[string]any{
+			"Basic":                 nil,
+			"ProcessorCapabilities": nil,
+		},
+	}
+	j, err := json.Marshal(pq)
+	if err != nil {
+		return err
+	}
+	var (
+		properties *uint16
+		result     *uint16
+	)
+	if err := vmcompute.HcsGetServiceProperties(string(j), &properties, &result); err != nil {
+		return err
+	}
+	var props struct {
+		PropertyResponses struct {
+			Basic struct {
+				Response struct {
+					SupportedSchemaVersions []struct {
+						Major uint
+						Minor uint
+					}
+				}
+			}
+			ProcessorCapabilities struct {
+				Response json.RawMessage
+			}
+		}
+	}
+	if err := json.Unmarshal([]byte(windows.UTF16PtrToString(properties)), &props); err != nil {
+		return err
+	}
+	fmt.Printf("Supported schema versions: ")
+	for i, sv := range props.PropertyResponses.Basic.Response.SupportedSchemaVersions {
+		if i != 0 {
+			fmt.Printf(", ")
+		}
+		fmt.Printf("%d.%d", sv.Major, sv.Minor)
+	}
+	fmt.Printf("\n")
+	fmt.Printf("ProcessorCapabilities:\n")
+	j, err = json.MarshalIndent(props.PropertyResponses.ProcessorCapabilities.Response, "\t", "\t")
+	if err != nil {
+		return err
+	}
+	fmt.Printf("\t%s\n", string(j))
 	return nil
 }
 
