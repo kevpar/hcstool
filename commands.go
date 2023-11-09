@@ -326,6 +326,7 @@ func (c *propsCommand) Execute(state *state, fs *flag.FlagSet) error {
 		PropertyResponses struct {
 			Basic struct {
 				Response struct {
+					State     string
 					RuntimeId string
 				}
 			}
@@ -340,6 +341,7 @@ func (c *propsCommand) Execute(state *state, fs *flag.FlagSet) error {
 	if err := json.Unmarshal([]byte(windows.UTF16PtrToString(properties)), &props); err != nil {
 		return err
 	}
+	fmt.Printf("State: %s\n", props.PropertyResponses.Basic.Response.State)
 	fmt.Printf("RuntimeID: %s\n", props.PropertyResponses.Basic.Response.RuntimeId)
 	fmt.Printf("VmVersion: %d.%d\n", props.PropertyResponses.VmVersion.Response.Major, props.PropertyResponses.VmVersion.Response.Minor)
 	return nil
@@ -413,15 +415,16 @@ func (c *listCommand) Execute(state *state, fs *flag.FlagSet) error {
 			Name       string
 			SystemType string
 			Owner      string
+			State      string
 		}
 		var systems []systemData
 		if err := json.Unmarshal([]byte(windows.UTF16PtrToString(systemsRaw)), &systems); err != nil {
 			return err
 		}
 		if err := printTable(
-			[]colInfo{{"ID", "%s"}, {"NAME", "%s"}, {"TYPE", "%s"}, {"OWNER", "%s"}},
+			[]colInfo{{"ID", "%s"}, {"NAME", "%s"}, {"TYPE", "%s"}, {"OWNER", "%s"}, {"STATE", "%s"}},
 			systems,
-			func(rd systemData) []any { return []any{rd.ID, rd.Name, rd.SystemType, rd.Owner} },
+			func(rd systemData) []any { return []any{rd.ID, rd.Name, rd.SystemType, rd.Owner, rd.State} },
 		); err != nil {
 			return err
 		}
