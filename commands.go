@@ -67,12 +67,14 @@ func getCS(state *state, cf *commonFlags) (string, *cs, error) {
 	return key, cs, nil
 }
 
-type createCommand struct{}
+type createCommand struct{ setDefault *bool }
 
-func (c *createCommand) Name() string                { return "create" }
-func (c *createCommand) Description() string         { return "Creates a compute system." }
-func (c *createCommand) ArgHelp() string             { return "ID PATH" }
-func (c *createCommand) SetupFlags(fs *flag.FlagSet) {}
+func (c *createCommand) Name() string        { return "create" }
+func (c *createCommand) Description() string { return "Creates a compute system." }
+func (c *createCommand) ArgHelp() string     { return "ID PATH" }
+func (c *createCommand) SetupFlags(fs *flag.FlagSet) {
+	c.setDefault = fs.Bool("def", false, "Set the new compute system as the default.")
+}
 
 func (c *createCommand) Execute(state *state, fs *flag.FlagSet) error {
 	id := fs.Arg(0)
@@ -108,6 +110,9 @@ func (c *createCommand) Execute(state *state, fs *flag.FlagSet) error {
 		return err
 	}
 	state.systems[id] = &cs
+	if *c.setDefault {
+		state.def = id
+	}
 	return nil
 }
 
