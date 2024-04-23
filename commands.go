@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -30,6 +31,7 @@ func allCommands() []repl.Command[*state] {
 		&listCommand{},
 		&openCommand{},
 		&svcPropsCommand{},
+		&modifyCommand{},
 	}
 }
 
@@ -531,50 +533,40 @@ func (c *svcPropsCommand) Execute(state *state, fs *flag.FlagSet) error {
 	return nil
 }
 
-type colInfo struct {
-	header string
-	format string
+type modifyCommand struct{ cf commonFlags }
+
+func (c *modifyCommand) Name() string        { return "modify" }
+func (c *modifyCommand) Description() string { return "Modifies a compute system." }
+func (c *modifyCommand) ArgHelp() string     { return "add|remove|update PATH SETTINGS" }
+func (c *modifyCommand) SetupFlags(fs *flag.FlagSet) {
+	setupCommonFlags(&c.cf, fs)
 }
 
-func printTable[T any](colInfo []colInfo, rowData []T, rowExtract func(T) []any) error {
-	var (
-		cols = len(colInfo)
-		max  = make([]int, 0, cols)
-		data = make([][]string, 0, len(rowData))
-	)
-	for _, ci := range colInfo {
-		max = append(max, len(ci.header))
+func (c *modifyCommand) Execute(state *state, fs *flag.FlagSet) error {
+	_, cs, err := getCS(state, &c.cf)
+	if err != nil {
+		return err
 	}
-	for _, rd := range rowData {
-		d := rowExtract(rd)
-		if len(d) != cols {
-			return fmt.Errorf("row did not match header column count")
-		}
-		values := make([]string, 0, cols)
-		for i := 0; i < cols; i++ {
-			s := fmt.Sprintf(colInfo[i].format, d[i])
-			if l := len(s); l > max[i] {
-				max[i] = l
-			}
-			values = append(values, s)
-		}
-		data = append(data, values)
+	typ, ok := map[string]string{
+		"add":    "Add",
+		"remove": "Remove",
+		"update": "Update",
+	}[strings.ToLower(fs.Arg(0))]
+	if !ok {
+		return fmt.Errorf("unrecognized operation: %s", fs.Arg(0))
 	}
-	for i := range colInfo {
-		if i > 0 {
-			fmt.Printf(" ")
-		}
-		fmt.Printf("%[1]*[2]s", max[i], colInfo[i].header)
+	req := hcsschema.ModifySettingRequest{
+		RequestType:  typ,
+		ResourcePath: fs.Arg(1),
+		Settings:     json.RawMessage(fs.Arg(2)),
 	}
-	fmt.Printf("\n")
-	for _, d := range data {
-		for i := range d {
-			if i > 0 {
-				fmt.Printf(" ")
-			}
-			fmt.Printf("%[1]*[2]s", max[i], d[i])
-		}
-		fmt.Printf("\n")
+	j, err := json.Marshal(req)
+	if err != nil {
+		return err
+	}
+	var result *uint16
+	if err := vmcompute.HcsModifyComputeSystem(cs.handle, string(j), &result); err != nil {
+		return err
 	}
 	return nil
 }
