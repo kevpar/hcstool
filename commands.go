@@ -1,18 +1,15 @@
 package main
 
 import (
-	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
-	"time"
 
+	"github.com/kevpar/hcstool/internal/computecore"
 	"github.com/kevpar/hcstool/internal/hcsschema"
-	"github.com/kevpar/hcstool/internal/vmcompute"
 	"github.com/kevpar/repl-go"
 	"golang.org/x/sys/windows"
 )
@@ -41,9 +38,7 @@ type state struct {
 }
 
 type cs struct {
-	handle   vmcompute.HcsSystem
-	callback vmcompute.HcsCallback
-	ch       chan *hcsNotification
+	handle computecore.HCS_SYSTEM
 }
 
 func setupCommonFlags(cf *commonFlags, fs *flag.FlagSet) {
@@ -88,27 +83,12 @@ func (c *createCommand) Execute(state *state, fs *flag.FlagSet) error {
 	if err != nil {
 		return err
 	}
-	var result *uint16
-	if err := vmcompute.HcsCreateComputeSystem(fs.Arg(0), string(doc), 0, &cs.handle, &result); err != nil && err != vmcompute.ErrVmcomputeOperationPending {
+	op := computecore.NewOperation(0)
+	defer op.Close()
+	if err := computecore.HcsCreateComputeSystem(fs.Arg(0), string(doc), op, nil, &cs.handle); err != nil {
 		return err
 	}
-	if err := vmcompute.HcsRegisterComputeSystemCallback(cs.handle, syscall.NewCallback(computeSystemCallback), 0, &cs.callback); err != nil {
-		return err
-	}
-	cs.ch = make(chan *hcsNotification)
-	registerNotification(0, cs.ch)
-	if err := func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		n, err := pumpNotificationsUntil(ctx, cs.ch, 2)
-		if err != nil {
-			return err
-		}
-		if n.notificationStatus != 0 {
-			return fmt.Errorf("%s", stringNotification(n))
-		}
-		return nil
-	}(); err != nil {
+	if _, err := op.WaitResult(windows.INFINITE); err != nil {
 		return err
 	}
 	state.systems[id] = &cs
@@ -130,22 +110,12 @@ func (c *startCommand) Execute(state *state, fs *flag.FlagSet) error {
 	if err != nil {
 		return err
 	}
-	var result *uint16
-	if err := vmcompute.HcsStartComputeSystem(cs.handle, "", &result); err != nil && err != vmcompute.ErrVmcomputeOperationPending {
+	op := computecore.NewOperation(0)
+	defer op.Close()
+	if err := computecore.HcsStartComputeSystem(cs.handle, op, ""); err != nil {
 		return err
 	}
-	if err := func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		n, err := pumpNotificationsUntil(ctx, cs.ch, 3)
-		if err != nil {
-			return err
-		}
-		if n.notificationStatus != 0 {
-			return fmt.Errorf("%s", stringNotification(n))
-		}
-		return nil
-	}(); err != nil {
+	if _, err := op.WaitResult(windows.INFINITE); err != nil {
 		return err
 	}
 	return nil
@@ -163,13 +133,7 @@ func (c *closeCommand) Execute(state *state, fs *flag.FlagSet) error {
 	if err != nil {
 		return err
 	}
-	if err := vmcompute.HcsUnregisterComputeSystemCallback(cs.callback); err != nil {
-		return err
-	}
-	cs.callback = 0
-	if err := vmcompute.HcsCloseComputeSystem(cs.handle); err != nil {
-		return err
-	}
+	computecore.HcsCloseComputeSystem(cs.handle)
 	cs.handle = 0
 	delete(state.systems, id)
 	if state.def == id {
@@ -190,22 +154,12 @@ func (c *suspendCommand) Execute(state *state, fs *flag.FlagSet) error {
 	if err != nil {
 		return err
 	}
-	var result *uint16
-	if err := vmcompute.HcsPauseComputeSystem(cs.handle, "", &result); err != nil && err != vmcompute.ErrVmcomputeOperationPending {
+	op := computecore.NewOperation(0)
+	defer op.Close()
+	if err := computecore.HcsPauseComputeSystem(cs.handle, op, ""); err != nil {
 		return err
 	}
-	if err := func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		n, err := pumpNotificationsUntil(ctx, cs.ch, 4)
-		if err != nil {
-			return err
-		}
-		if n.notificationStatus != 0 {
-			return fmt.Errorf("%s", stringNotification(n))
-		}
-		return nil
-	}(); err != nil {
+	if _, err := op.WaitResult(windows.INFINITE); err != nil {
 		return err
 	}
 	return nil
@@ -223,22 +177,12 @@ func (c *resumeCommand) Execute(state *state, fs *flag.FlagSet) error {
 	if err != nil {
 		return err
 	}
-	var result *uint16
-	if err := vmcompute.HcsResumeComputeSystem(cs.handle, "", &result); err != nil && err != vmcompute.ErrVmcomputeOperationPending {
+	op := computecore.NewOperation(0)
+	defer op.Close()
+	if err := computecore.HcsResumeComputeSystem(cs.handle, op, ""); err != nil {
 		return err
 	}
-	if err := func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		n, err := pumpNotificationsUntil(ctx, cs.ch, 5)
-		if err != nil {
-			return err
-		}
-		if n.notificationStatus != 0 {
-			return fmt.Errorf("%s", stringNotification(n))
-		}
-		return nil
-	}(); err != nil {
+	if _, err := op.WaitResult(windows.INFINITE); err != nil {
 		return err
 	}
 	return nil
@@ -272,22 +216,12 @@ func (c *saveCommand) Execute(state *state, fs *flag.FlagSet) error {
 	if err != nil {
 		return err
 	}
-	var result *uint16
-	if err := vmcompute.HcsSaveComputeSystem(cs.handle, string(j), &result); err != nil && err != vmcompute.ErrVmcomputeOperationPending {
+	op := computecore.NewOperation(0)
+	defer op.Close()
+	if err := computecore.HcsSaveComputeSystem(cs.handle, op, string(j)); err != nil {
 		return err
 	}
-	if err := func() error {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		n, err := pumpNotificationsUntil(ctx, cs.ch, 8)
-		if err != nil {
-			return err
-		}
-		if n.notificationStatus != 0 {
-			return fmt.Errorf("%s", stringNotification(n))
-		}
-		return nil
-	}(); err != nil {
+	if _, err := op.WaitResult(windows.INFINITE); err != nil {
 		return err
 	}
 	return nil
@@ -323,11 +257,13 @@ func (c *propsCommand) Execute(state *state, fs *flag.FlagSet) error {
 	if err != nil {
 		return err
 	}
-	var (
-		properties *uint16
-		result     *uint16
-	)
-	if err := vmcompute.HcsGetComputeSystemProperties(cs.handle, string(j), &properties, &result); err != nil {
+	op := computecore.NewOperation(0)
+	defer op.Close()
+	if err := computecore.HcsGetComputeSystemProperties(cs.handle, op, string(j)); err != nil {
+		return err
+	}
+	properties, err := op.WaitResult(windows.INFINITE)
+	if err != nil {
 		return err
 	}
 	var props struct {
@@ -346,7 +282,7 @@ func (c *propsCommand) Execute(state *state, fs *flag.FlagSet) error {
 			}
 		}
 	}
-	if err := json.Unmarshal([]byte(windows.UTF16PtrToString(properties)), &props); err != nil {
+	if err := json.Unmarshal([]byte(properties), &props); err != nil {
 		return err
 	}
 	fmt.Printf("State: %s\n", props.PropertyResponses.Basic.Response.State)
@@ -370,7 +306,7 @@ func (c *grantCommand) Execute(state *state, fs *flag.FlagSet) error {
 	if err != nil {
 		return err
 	}
-	if err := vmcompute.GrantVmAccess(fs.Arg(0), path); err != nil {
+	if err := computecore.HcsGrantVmAccess(fs.Arg(0), path); err != nil {
 		return err
 	}
 	return nil
@@ -411,11 +347,13 @@ func (c *listCommand) SetupFlags(fs *flag.FlagSet) {
 
 func (c *listCommand) Execute(state *state, fs *flag.FlagSet) error {
 	if *c.all {
-		var (
-			systemsRaw *uint16
-			result     *uint16
-		)
-		if err := vmcompute.HcsEnumerateComputeSystems("", &systemsRaw, &result); err != nil {
+		op := computecore.NewOperation(0)
+		defer op.Close()
+		if err := computecore.HcsEnumerateComputeSystems("", op); err != nil {
+			return err
+		}
+		systemsRaw, err := op.WaitResult(windows.INFINITE)
+		if err != nil {
 			return err
 		}
 		type systemData struct {
@@ -426,7 +364,7 @@ func (c *listCommand) Execute(state *state, fs *flag.FlagSet) error {
 			State      string
 		}
 		var systems []systemData
-		if err := json.Unmarshal([]byte(windows.UTF16PtrToString(systemsRaw)), &systems); err != nil {
+		if err := json.Unmarshal([]byte(systemsRaw), &systems); err != nil {
 			return err
 		}
 		if err := printTable(
@@ -456,17 +394,10 @@ func (c *openCommand) Execute(state *state, fs *flag.FlagSet) error {
 	if _, ok := state.systems[id]; ok {
 		return fmt.Errorf("compute system already open: %s", id)
 	}
-	var (
-		cs     cs
-		result *uint16
-	)
-	if err := vmcompute.HcsOpenComputeSystem(id, &cs.handle, &result); err != nil {
+	var cs cs
+	if err := computecore.HcsOpenComputeSystem(id, 0, &cs.handle); err != nil {
 		return err
 	}
-	if err := vmcompute.HcsRegisterComputeSystemCallback(cs.handle, syscall.NewCallback(computeSystemCallback), 0, &cs.callback); err != nil {
-		return err
-	}
-	cs.ch = make(chan *hcsNotification)
 	state.systems[id] = &cs
 	return nil
 }
@@ -491,11 +422,8 @@ func (c *svcPropsCommand) Execute(state *state, fs *flag.FlagSet) error {
 	if err != nil {
 		return err
 	}
-	var (
-		properties *uint16
-		result     *uint16
-	)
-	if err := vmcompute.HcsGetServiceProperties(string(j), &properties, &result); err != nil {
+	var properties *uint16
+	if err := computecore.HcsGetServiceProperties(string(j), &properties); err != nil {
 		return err
 	}
 	var props struct {
@@ -564,8 +492,12 @@ func (c *modifyCommand) Execute(state *state, fs *flag.FlagSet) error {
 	if err != nil {
 		return err
 	}
-	var result *uint16
-	if err := vmcompute.HcsModifyComputeSystem(cs.handle, string(j), &result); err != nil {
+	op := computecore.NewOperation(0)
+	defer op.Close()
+	if err := computecore.HcsModifyComputeSystem(cs.handle, op, string(j), 0); err != nil {
+		return err
+	}
+	if _, err := op.WaitResult(windows.INFINITE); err != nil {
 		return err
 	}
 	return nil
