@@ -290,6 +290,7 @@ type propsCommand struct {
 	cf         commonFlags
 	vmVersion  *bool
 	compatInfo *bool
+	procReqs   *bool
 }
 
 func (c *propsCommand) Name() string        { return "props" }
@@ -299,6 +300,7 @@ func (c *propsCommand) SetupFlags(fs *flag.FlagSet) {
 	setupCommonFlags(&c.cf, fs)
 	c.vmVersion = fs.Bool("vmversion", false, "Query for VmVersion property as well.")
 	c.compatInfo = fs.Bool("compatinfo", false, "Query for CompatibilityInfo property as well.")
+	c.procReqs = fs.Bool("procreqs", false, "Query for VmProcessorRequirements as well.")
 }
 
 func (c *propsCommand) Execute(state *state, fs *flag.FlagSet) error {
@@ -316,6 +318,9 @@ func (c *propsCommand) Execute(state *state, fs *flag.FlagSet) error {
 	}
 	if *c.compatInfo {
 		pq.Queries["CompatibilityInfo"] = nil
+	}
+	if *c.procReqs {
+		pq.Queries["VmProcessorRequirements"] = nil
 	}
 	j, err := json.Marshal(pq)
 	if err != nil {
@@ -349,6 +354,9 @@ func (c *propsCommand) Execute(state *state, fs *flag.FlagSet) error {
 					Data string
 				}
 			}
+			VmProcessorRequirements struct {
+				Response json.RawMessage
+			}
 		}
 	}
 	if err := json.Unmarshal([]byte(properties), &props); err != nil {
@@ -361,6 +369,14 @@ func (c *propsCommand) Execute(state *state, fs *flag.FlagSet) error {
 	}
 	if *c.compatInfo {
 		fmt.Printf("CompatibilityInfo: %s\n", props.PropertyResponses.CompatibilityInfo.Response.Data)
+	}
+	if *c.procReqs {
+		fmt.Printf("VmProcessorRequirements:\n")
+		j, err = json.MarshalIndent(props.PropertyResponses.VmProcessorRequirements.Response, "\t", "\t")
+		if err != nil {
+			return err
+		}
+		fmt.Printf("\t%s\n", string(j))
 	}
 	return nil
 }
