@@ -4,11 +4,13 @@ import (
 	"syscall"
 	"unsafe"
 
+	_ "github.com/Microsoft/go-winio"
 	"golang.org/x/sys/windows"
 )
 
 //go:generate go run github.com/Microsoft/go-winio/tools/mkwinsyscall -output zsyscall_windows.go computecore.go
 
+// Operations
 //sys HcsCreateOperation(context uintptr, callback uintptr) (op HCS_OPERATION) = computecore.HcsCreateOperation
 //sys HcsCloseOperation(op HCS_OPERATION) () = computecore.HcsCloseOperation
 //sys HcsGetOperationContext(op HCS_OPERATION) (context uintptr) = computecore.HcsGetOperationContext
@@ -23,7 +25,9 @@ import (
 //sys HcsWaitForOperationResultAndProcessInfo(op HCS_OPERATION, timeoutMS uint32, procInfo *HCS_PROCESS_INFORMATION, result **uint16) (hr error) = computecore.HcsWaitForOperationResultAndProcessInfo
 //sys HcsSetOperationCallback(op HCS_OPERATION, context uintptr, callback uintptr) (hr error) = computecore.HcsSetOperationCallback
 //sys HcsCancelOperation(op HCS_OPERATION) (hr error) = computecore.HcsCancelOperation
+//sys HcsAddResourceToOperation(op HCS_OPERATION, typ HCS_RESOURCE_TYPE, uri string, handle uintptr) (hr error) = computecore.HcsAddResourceToOperation
 
+// Compute systems
 //sys HcsCreateComputeSystem(id string, config string, op HCS_OPERATION, sd *windows.SECURITY_DESCRIPTOR, cs *HCS_SYSTEM) (hr error) = computecore.HcsCreateComputeSystem
 //sys HcsOpenComputeSystem(id string, access uint32, cs *HCS_SYSTEM) (hr error) = computecore.HcsOpenComputeSystem
 //sys HcsCloseComputeSystem(cs HCS_SYSTEM) () = computecore.HcsCloseComputeSystem
@@ -39,17 +43,25 @@ import (
 //sys HcsSetComputeSystemCallback(cs HCS_SYSTEM, options HCS_EVENT_OPTIONS, context uintptr, callback uintptr) (hr error) = computecore.HcsSetComputeSystemCallback
 //sys HcsEnumerateComputeSystems(query string, op HCS_OPERATION) (hr error) = computecore.HcsEnumerateComputeSystems
 
+// Service
 //sys HcsGetServiceProperties(query string, result **uint16) (hr error) = computecore.HcsGetServiceProperties
 
+// Utility
 //sys HcsGrantVmAccess(vmID string, path string) (hr error) = computecore.HcsGrantVmAccess
+
+// Live migration
+//sys HcsInitializeLiveMigrationOnSource(cs HCS_SYSTEM, op HCS_OPERATION, options string) (hr error) = computecore.HcsInitializeLiveMigrationOnSource
+//sys HcsStartLiveMigrationOnSource(cs HCS_SYSTEM, op HCS_OPERATION, options string) (hr error) = computecore.HcsStartLiveMigrationOnSource
+//sys HcsStartLiveMigrationTransfer(cs HCS_SYSTEM, op HCS_OPERATION, options string) (hr error) = computecore.HcsStartLiveMigrationTransfer
+//sys HcsFinalizeLiveMigration(cs HCS_SYSTEM, op HCS_OPERATION, options string) (hr error) = computecore.HcsFinalizeLiveMigration
 
 type HCS_SYSTEM uintptr
 type HCS_PROCESS uintptr
 type HCS_OPERATION uintptr
 
 type HCS_PROCESS_INFORMATION struct {
-	ProcessID uint32
-	_         uint32
+	ProcessId uint32
+	_         uint32 // Reserved
 	StdInput  windows.Handle
 	StdOutput windows.Handle
 	StdError  windows.Handle
@@ -104,6 +116,16 @@ type HCS_EVENT_OPTIONS int
 const (
 	HcsEventOptionNone                     HCS_EVENT_OPTIONS = 0
 	HcsEventOptionEnableOperationCallbacks HCS_EVENT_OPTIONS = 1
+)
+
+type HCS_RESOURCE_TYPE int
+
+const (
+	HcsResourceTypeNone HCS_RESOURCE_TYPE = iota
+	HcsResourceTypeFile
+	HcsResourceTypeJob
+	HcsResourceTypeComObject
+	HcsResourceTypeSocket
 )
 
 func NewOperation(context uintptr) HCS_OPERATION {

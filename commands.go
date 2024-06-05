@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
@@ -29,6 +30,10 @@ func allCommands() []repl.Command[*state] {
 		&openCommand{},
 		&svcPropsCommand{},
 		&modifyCommand{},
+		&lmSourceInitializeCommand{},
+		&lmSourceStartCommand{},
+		&lmTransferCommand{},
+		&lmFinalizeCommand{},
 	}
 }
 
@@ -98,27 +103,81 @@ func (c *createCommand) Execute(state *state, fs *flag.FlagSet) error {
 	return nil
 }
 
-type startCommand struct{ cf commonFlags }
+type startCommand struct {
+	cf        commonFlags
+	migsocket *string
+}
 
-func (c *startCommand) Name() string                { return "start" }
-func (c *startCommand) Description() string         { return "Starts a compute system." }
-func (c *startCommand) ArgHelp() string             { return "" }
-func (c *startCommand) SetupFlags(fs *flag.FlagSet) { setupCommonFlags(&c.cf, fs) }
+func (c *startCommand) Name() string        { return "start" }
+func (c *startCommand) Description() string { return "Starts a compute system." }
+func (c *startCommand) ArgHelp() string     { return "" }
+func (c *startCommand) SetupFlags(fs *flag.FlagSet) {
+	setupCommonFlags(&c.cf, fs)
+	c.migsocket = fs.String("migsocket", "", "TCP address to dial for live migration connection.")
+}
 
 func (c *startCommand) Execute(state *state, fs *flag.FlagSet) error {
+	var sock uintptr
+	if *c.migsocket != "" {
+		addr, err := netip.ParseAddrPort(*c.migsocket)
+		if err != nil {
+			return err
+		}
+		s, err := dial(addr)
+		if err != nil {
+			return err
+		}
+		sock = uintptr(s)
+	}
+
 	_, cs, err := getCS(state, &c.cf)
 	if err != nil {
 		return err
 	}
 	op := computecore.NewOperation(0)
 	defer op.Close()
-	if err := computecore.HcsStartComputeSystem(cs.handle, op, ""); err != nil {
+	var optionsRaw []byte
+	if sock != 0 {
+		if err := computecore.HcsAddResourceToOperation(op, computecore.HcsResourceTypeSocket, "hcs:/VirtualMachine/LiveMigrationSocket", sock); err != nil {
+			return err
+		}
+		options := hcsschema.StartOptions{
+			DestinationMigrationOptions: &hcsschema.MigrationStartOptions{
+				NetworkSettings: &hcsschema.MigrationNetworkSettings{
+					SessionID: 1,
+				},
+			},
+		}
+		optionsRaw, err = json.Marshal(options)
+		if err != nil {
+			return err
+		}
+	}
+	if err := computecore.HcsStartComputeSystem(cs.handle, op, string(optionsRaw)); err != nil {
 		return err
 	}
 	if _, err := op.WaitResult(windows.INFINITE); err != nil {
 		return err
 	}
 	return nil
+}
+
+func dial(addr netip.AddrPort) (_ windows.Handle, err error) {
+	conn, err := windows.Socket(windows.AF_INET, windows.SOCK_STREAM, windows.IPPROTO_TCP)
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		if err != nil {
+			windows.Closesocket(conn)
+		}
+	}()
+	fmt.Printf("connecting...\n")
+	if err := windows.Connect(conn, &windows.SockaddrInet4{Port: int(addr.Port()), Addr: addr.Addr().As4()}); err != nil {
+		return 0, err
+	}
+	fmt.Printf("connected\n")
+	return conn, nil
 }
 
 type closeCommand struct{ cf commonFlags }
@@ -228,8 +287,9 @@ func (c *saveCommand) Execute(state *state, fs *flag.FlagSet) error {
 }
 
 type propsCommand struct {
-	cf        commonFlags
-	vmVersion *bool
+	cf         commonFlags
+	vmVersion  *bool
+	compatInfo *bool
 }
 
 func (c *propsCommand) Name() string        { return "props" }
@@ -238,6 +298,7 @@ func (c *propsCommand) ArgHelp() string     { return "" }
 func (c *propsCommand) SetupFlags(fs *flag.FlagSet) {
 	setupCommonFlags(&c.cf, fs)
 	c.vmVersion = fs.Bool("vmversion", false, "Query for VmVersion property as well.")
+	c.compatInfo = fs.Bool("compatinfo", false, "Query for CompatibilityInfo property as well.")
 }
 
 func (c *propsCommand) Execute(state *state, fs *flag.FlagSet) error {
@@ -252,6 +313,9 @@ func (c *propsCommand) Execute(state *state, fs *flag.FlagSet) error {
 	}
 	if *c.vmVersion {
 		pq.Queries["VmVersion"] = nil
+	}
+	if *c.compatInfo {
+		pq.Queries["CompatibilityInfo"] = nil
 	}
 	j, err := json.Marshal(pq)
 	if err != nil {
@@ -280,6 +344,11 @@ func (c *propsCommand) Execute(state *state, fs *flag.FlagSet) error {
 					Minor uint
 				}
 			}
+			CompatibilityInfo struct {
+				Response struct {
+					Data string
+				}
+			}
 		}
 	}
 	if err := json.Unmarshal([]byte(properties), &props); err != nil {
@@ -287,7 +356,12 @@ func (c *propsCommand) Execute(state *state, fs *flag.FlagSet) error {
 	}
 	fmt.Printf("State: %s\n", props.PropertyResponses.Basic.Response.State)
 	fmt.Printf("RuntimeID: %s\n", props.PropertyResponses.Basic.Response.RuntimeId)
-	fmt.Printf("VmVersion: %d.%d\n", props.PropertyResponses.VmVersion.Response.Major, props.PropertyResponses.VmVersion.Response.Minor)
+	if *c.vmVersion {
+		fmt.Printf("VmVersion: %d.%d\n", props.PropertyResponses.VmVersion.Response.Major, props.PropertyResponses.VmVersion.Response.Minor)
+	}
+	if *c.compatInfo {
+		fmt.Printf("CompatibilityInfo: %s\n", props.PropertyResponses.CompatibilityInfo.Response.Data)
+	}
 	return nil
 }
 
@@ -495,6 +569,190 @@ func (c *modifyCommand) Execute(state *state, fs *flag.FlagSet) error {
 	op := computecore.NewOperation(0)
 	defer op.Close()
 	if err := computecore.HcsModifyComputeSystem(cs.handle, op, string(j), 0); err != nil {
+		return err
+	}
+	if _, err := op.WaitResult(windows.INFINITE); err != nil {
+		return err
+	}
+	return nil
+}
+
+type lmSourceInitializeCommand struct{ cf commonFlags }
+
+func (c *lmSourceInitializeCommand) Name() string { return "lmsrcinit" }
+func (c *lmSourceInitializeCommand) Description() string {
+	return "Initializes the source for live migration."
+}
+func (c *lmSourceInitializeCommand) ArgHelp() string { return "" }
+func (c *lmSourceInitializeCommand) SetupFlags(fs *flag.FlagSet) {
+	setupCommonFlags(&c.cf, fs)
+}
+
+func (c *lmSourceInitializeCommand) Execute(state *state, fs *flag.FlagSet) error {
+	_, cs, err := getCS(state, &c.cf)
+	if err != nil {
+		return err
+	}
+	op := computecore.NewOperation(0)
+	defer op.Close()
+	options := hcsschema.MigrationInitializeOptions{}
+	optionsRaw, err := json.Marshal(options)
+	if err != nil {
+		return err
+	}
+	if err := computecore.HcsInitializeLiveMigrationOnSource(cs.handle, op, string(optionsRaw)); err != nil {
+		return err
+	}
+	if _, err := op.WaitResult(windows.INFINITE); err != nil {
+		return err
+	}
+	return nil
+}
+
+type lmSourceStartCommand struct{ cf commonFlags }
+
+func (c *lmSourceStartCommand) Name() string { return "lmsrcstart" }
+func (c *lmSourceStartCommand) Description() string {
+	return "Starts the source for live migration."
+}
+func (c *lmSourceStartCommand) ArgHelp() string { return "SOCKET" }
+func (c *lmSourceStartCommand) SetupFlags(fs *flag.FlagSet) {
+	setupCommonFlags(&c.cf, fs)
+}
+
+func (c *lmSourceStartCommand) Execute(state *state, fs *flag.FlagSet) error {
+	addr, err := netip.ParseAddrPort(fs.Arg(0))
+	if err != nil {
+		return err
+	}
+	sock, err := listen(addr)
+	if err != nil {
+		return err
+	}
+
+	_, cs, err := getCS(state, &c.cf)
+	if err != nil {
+		return err
+	}
+	op := computecore.NewOperation(0)
+	defer op.Close()
+	if err := computecore.HcsAddResourceToOperation(op, computecore.HcsResourceTypeSocket, "hcs:/VirtualMachine/LiveMigrationSocket", uintptr(sock)); err != nil {
+		return err
+	}
+	options := hcsschema.MigrationStartOptions{
+		NetworkSettings: &hcsschema.MigrationNetworkSettings{
+			SessionID: 1,
+		},
+	}
+	optionsRaw, err := json.Marshal(options)
+	if err != nil {
+		return err
+	}
+	if err := computecore.HcsStartLiveMigrationOnSource(cs.handle, op, string(optionsRaw)); err != nil {
+		return err
+	}
+	if _, err := op.WaitResult(windows.INFINITE); err != nil {
+		return err
+	}
+	return nil
+}
+
+func listen(addr netip.AddrPort) (_ windows.Handle, err error) {
+	l, err := windows.Socket(windows.AF_INET, windows.SOCK_STREAM, windows.IPPROTO_TCP)
+	if err != nil {
+		return 0, err
+	}
+	defer windows.Closesocket(l)
+	if err := windows.Bind(l, &windows.SockaddrInet4{Port: int(addr.Port()), Addr: addr.Addr().As4()}); err != nil {
+		return 0, err
+	}
+	conn, err := windows.Socket(windows.AF_INET, windows.SOCK_STREAM, windows.IPPROTO_TCP)
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		if err != nil {
+			windows.Closesocket(conn)
+		}
+	}()
+	if err := windows.Listen(l, 1); err != nil {
+		return 0, err
+	}
+	var buf [64]byte
+	var recvd uint32
+	event, err := windows.CreateEvent(nil, 1, 0, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer windows.CloseHandle(event)
+	overlapped := windows.Overlapped{HEvent: event}
+	if err := windows.AcceptEx(l, conn, &buf[0], 0, 32, 32, &recvd, &overlapped); err != nil && err != windows.ERROR_IO_PENDING {
+		return 0, err
+	}
+	fmt.Printf("connecting...\n")
+	if _, err := windows.WaitForSingleObject(event, windows.INFINITE); err != nil {
+		return 0, err
+	}
+	fmt.Printf("connected\n")
+	return conn, nil
+}
+
+type lmTransferCommand struct{ cf commonFlags }
+
+func (c *lmTransferCommand) Name() string { return "lmtransfer" }
+func (c *lmTransferCommand) Description() string {
+	return "Initiates live migration transfer."
+}
+func (c *lmTransferCommand) ArgHelp() string { return "" }
+func (c *lmTransferCommand) SetupFlags(fs *flag.FlagSet) {
+	setupCommonFlags(&c.cf, fs)
+}
+
+func (c *lmTransferCommand) Execute(state *state, fs *flag.FlagSet) error {
+	_, cs, err := getCS(state, &c.cf)
+	if err != nil {
+		return err
+	}
+	op := computecore.NewOperation(0)
+	defer op.Close()
+	options := hcsschema.MigrationTransferOptions{}
+	optionsRaw, err := json.Marshal(options)
+	if err != nil {
+		return err
+	}
+	if err := computecore.HcsStartLiveMigrationTransfer(cs.handle, op, string(optionsRaw)); err != nil {
+		return err
+	}
+	if _, err := op.WaitResult(windows.INFINITE); err != nil {
+		return err
+	}
+	return nil
+}
+
+type lmFinalizeCommand struct{ cf commonFlags }
+
+func (c *lmFinalizeCommand) Name() string { return "lmfinalize" }
+func (c *lmFinalizeCommand) Description() string {
+	return "Finalizes the live migration."
+}
+func (c *lmFinalizeCommand) ArgHelp() string { return "" }
+func (c *lmFinalizeCommand) SetupFlags(fs *flag.FlagSet) {
+	setupCommonFlags(&c.cf, fs)
+}
+
+func (c *lmFinalizeCommand) Execute(state *state, fs *flag.FlagSet) error {
+	_, cs, err := getCS(state, &c.cf)
+	if err != nil {
+		return err
+	}
+	op := computecore.NewOperation(0)
+	defer op.Close()
+	options := hcsschema.MigrationFinalizedOptions{}
+	optionsRaw, err := json.Marshal(options)
+	if err != nil {
+		return err
+	}
+	if err := computecore.HcsFinalizeLiveMigration(cs.handle, op, string(optionsRaw)); err != nil {
 		return err
 	}
 	if _, err := op.WaitResult(windows.INFINITE); err != nil {

@@ -39,6 +39,7 @@ func errnoErr(e syscall.Errno) error {
 var (
 	modcomputecore = windows.NewLazySystemDLL("computecore.dll")
 
+	procHcsAddResourceToOperation               = modcomputecore.NewProc("HcsAddResourceToOperation")
 	procHcsCancelOperation                      = modcomputecore.NewProc("HcsCancelOperation")
 	procHcsCloseComputeSystem                   = modcomputecore.NewProc("HcsCloseComputeSystem")
 	procHcsCloseOperation                       = modcomputecore.NewProc("HcsCloseOperation")
@@ -46,6 +47,7 @@ var (
 	procHcsCreateComputeSystem                  = modcomputecore.NewProc("HcsCreateComputeSystem")
 	procHcsCreateOperation                      = modcomputecore.NewProc("HcsCreateOperation")
 	procHcsEnumerateComputeSystems              = modcomputecore.NewProc("HcsEnumerateComputeSystems")
+	procHcsFinalizeLiveMigration                = modcomputecore.NewProc("HcsFinalizeLiveMigration")
 	procHcsGetComputeSystemFromOperation        = modcomputecore.NewProc("HcsGetComputeSystemFromOperation")
 	procHcsGetComputeSystemProperties           = modcomputecore.NewProc("HcsGetComputeSystemProperties")
 	procHcsGetOperationContext                  = modcomputecore.NewProc("HcsGetOperationContext")
@@ -56,6 +58,7 @@ var (
 	procHcsGetProcessFromOperation              = modcomputecore.NewProc("HcsGetProcessFromOperation")
 	procHcsGetServiceProperties                 = modcomputecore.NewProc("HcsGetServiceProperties")
 	procHcsGrantVmAccess                        = modcomputecore.NewProc("HcsGrantVmAccess")
+	procHcsInitializeLiveMigrationOnSource      = modcomputecore.NewProc("HcsInitializeLiveMigrationOnSource")
 	procHcsModifyComputeSystem                  = modcomputecore.NewProc("HcsModifyComputeSystem")
 	procHcsOpenComputeSystem                    = modcomputecore.NewProc("HcsOpenComputeSystem")
 	procHcsPauseComputeSystem                   = modcomputecore.NewProc("HcsPauseComputeSystem")
@@ -66,10 +69,32 @@ var (
 	procHcsSetOperationContext                  = modcomputecore.NewProc("HcsSetOperationContext")
 	procHcsShutDownComputeSystem                = modcomputecore.NewProc("HcsShutDownComputeSystem")
 	procHcsStartComputeSystem                   = modcomputecore.NewProc("HcsStartComputeSystem")
+	procHcsStartLiveMigrationOnSource           = modcomputecore.NewProc("HcsStartLiveMigrationOnSource")
+	procHcsStartLiveMigrationTransfer           = modcomputecore.NewProc("HcsStartLiveMigrationTransfer")
 	procHcsTerminateComputeSystem               = modcomputecore.NewProc("HcsTerminateComputeSystem")
 	procHcsWaitForOperationResult               = modcomputecore.NewProc("HcsWaitForOperationResult")
 	procHcsWaitForOperationResultAndProcessInfo = modcomputecore.NewProc("HcsWaitForOperationResultAndProcessInfo")
 )
+
+func HcsAddResourceToOperation(op HCS_OPERATION, typ HCS_RESOURCE_TYPE, uri string, handle uintptr) (hr error) {
+	var _p0 *uint16
+	_p0, hr = syscall.UTF16PtrFromString(uri)
+	if hr != nil {
+		return
+	}
+	return _HcsAddResourceToOperation(op, typ, _p0, handle)
+}
+
+func _HcsAddResourceToOperation(op HCS_OPERATION, typ HCS_RESOURCE_TYPE, uri *uint16, handle uintptr) (hr error) {
+	r0, _, _ := syscall.SyscallN(procHcsAddResourceToOperation.Addr(), uintptr(op), uintptr(typ), uintptr(unsafe.Pointer(uri)), uintptr(handle))
+	if int32(r0) < 0 {
+		if r0&0x1fff0000 == 0x00070000 {
+			r0 &= 0xffff
+		}
+		hr = syscall.Errno(r0)
+	}
+	return
+}
 
 func HcsCancelOperation(op HCS_OPERATION) (hr error) {
 	r0, _, _ := syscall.SyscallN(procHcsCancelOperation.Addr(), uintptr(op))
@@ -154,6 +179,26 @@ func HcsEnumerateComputeSystems(query string, op HCS_OPERATION) (hr error) {
 
 func _HcsEnumerateComputeSystems(query *uint16, op HCS_OPERATION) (hr error) {
 	r0, _, _ := syscall.SyscallN(procHcsEnumerateComputeSystems.Addr(), uintptr(unsafe.Pointer(query)), uintptr(op))
+	if int32(r0) < 0 {
+		if r0&0x1fff0000 == 0x00070000 {
+			r0 &= 0xffff
+		}
+		hr = syscall.Errno(r0)
+	}
+	return
+}
+
+func HcsFinalizeLiveMigration(cs HCS_SYSTEM, op HCS_OPERATION, options string) (hr error) {
+	var _p0 *uint16
+	_p0, hr = syscall.UTF16PtrFromString(options)
+	if hr != nil {
+		return
+	}
+	return _HcsFinalizeLiveMigration(cs, op, _p0)
+}
+
+func _HcsFinalizeLiveMigration(cs HCS_SYSTEM, op HCS_OPERATION, options *uint16) (hr error) {
+	r0, _, _ := syscall.SyscallN(procHcsFinalizeLiveMigration.Addr(), uintptr(cs), uintptr(op), uintptr(unsafe.Pointer(options)))
 	if int32(r0) < 0 {
 		if r0&0x1fff0000 == 0x00070000 {
 			r0 &= 0xffff
@@ -271,6 +316,26 @@ func HcsGrantVmAccess(vmID string, path string) (hr error) {
 
 func _HcsGrantVmAccess(vmID *uint16, path *uint16) (hr error) {
 	r0, _, _ := syscall.SyscallN(procHcsGrantVmAccess.Addr(), uintptr(unsafe.Pointer(vmID)), uintptr(unsafe.Pointer(path)))
+	if int32(r0) < 0 {
+		if r0&0x1fff0000 == 0x00070000 {
+			r0 &= 0xffff
+		}
+		hr = syscall.Errno(r0)
+	}
+	return
+}
+
+func HcsInitializeLiveMigrationOnSource(cs HCS_SYSTEM, op HCS_OPERATION, options string) (hr error) {
+	var _p0 *uint16
+	_p0, hr = syscall.UTF16PtrFromString(options)
+	if hr != nil {
+		return
+	}
+	return _HcsInitializeLiveMigrationOnSource(cs, op, _p0)
+}
+
+func _HcsInitializeLiveMigrationOnSource(cs HCS_SYSTEM, op HCS_OPERATION, options *uint16) (hr error) {
+	r0, _, _ := syscall.SyscallN(procHcsInitializeLiveMigrationOnSource.Addr(), uintptr(cs), uintptr(op), uintptr(unsafe.Pointer(options)))
 	if int32(r0) < 0 {
 		if r0&0x1fff0000 == 0x00070000 {
 			r0 &= 0xffff
@@ -444,6 +509,46 @@ func HcsStartComputeSystem(cs HCS_SYSTEM, op HCS_OPERATION, options string) (hr 
 
 func _HcsStartComputeSystem(cs HCS_SYSTEM, op HCS_OPERATION, options *uint16) (hr error) {
 	r0, _, _ := syscall.SyscallN(procHcsStartComputeSystem.Addr(), uintptr(cs), uintptr(op), uintptr(unsafe.Pointer(options)))
+	if int32(r0) < 0 {
+		if r0&0x1fff0000 == 0x00070000 {
+			r0 &= 0xffff
+		}
+		hr = syscall.Errno(r0)
+	}
+	return
+}
+
+func HcsStartLiveMigrationOnSource(cs HCS_SYSTEM, op HCS_OPERATION, options string) (hr error) {
+	var _p0 *uint16
+	_p0, hr = syscall.UTF16PtrFromString(options)
+	if hr != nil {
+		return
+	}
+	return _HcsStartLiveMigrationOnSource(cs, op, _p0)
+}
+
+func _HcsStartLiveMigrationOnSource(cs HCS_SYSTEM, op HCS_OPERATION, options *uint16) (hr error) {
+	r0, _, _ := syscall.SyscallN(procHcsStartLiveMigrationOnSource.Addr(), uintptr(cs), uintptr(op), uintptr(unsafe.Pointer(options)))
+	if int32(r0) < 0 {
+		if r0&0x1fff0000 == 0x00070000 {
+			r0 &= 0xffff
+		}
+		hr = syscall.Errno(r0)
+	}
+	return
+}
+
+func HcsStartLiveMigrationTransfer(cs HCS_SYSTEM, op HCS_OPERATION, options string) (hr error) {
+	var _p0 *uint16
+	_p0, hr = syscall.UTF16PtrFromString(options)
+	if hr != nil {
+		return
+	}
+	return _HcsStartLiveMigrationTransfer(cs, op, _p0)
+}
+
+func _HcsStartLiveMigrationTransfer(cs HCS_SYSTEM, op HCS_OPERATION, options *uint16) (hr error) {
+	r0, _, _ := syscall.SyscallN(procHcsStartLiveMigrationTransfer.Addr(), uintptr(cs), uintptr(op), uintptr(unsafe.Pointer(options)))
 	if int32(r0) < 0 {
 		if r0&0x1fff0000 == 0x00070000 {
 			r0 &= 0xffff
