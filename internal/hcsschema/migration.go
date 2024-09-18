@@ -8,9 +8,9 @@ type MigrationInitializeOptions struct {
 	// migration is started. On destination, this setting is required when migration is initiated
 	MemoryTransport MigrationMemoryTransport `json:"MemoryTransport,omitempty"`
 	// Settings for throttling during memory transfer
-	MemoryTransferThrottleParams MemoryMigrationTransferThrottleParams `json:"MemoryTransferThrottleParams,omitempty"`
+	MemoryTransferThrottleParams *MemoryMigrationTransferThrottleParams `json:"MemoryTransferThrottleParams,omitempty"`
 	// If compression is enabled, additional settings can be configured with this setting
-	CompressionSettings MigrationCompressionSettings `json:"CompressionSettings,omitempty"`
+	CompressionSettings *MigrationCompressionSettings `json:"CompressionSettings,omitempty"`
 	// Enable memory checksum verification.
 	ChecksumVerification bool `json:"ChecksumVerification,omitempty"`
 	// Enable performance tracing during migration
