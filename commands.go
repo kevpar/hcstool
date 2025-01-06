@@ -288,6 +288,7 @@ func (c *saveCommand) Execute(state *state, fs *flag.FlagSet) error {
 
 type propsCommand struct {
 	cf         commonFlags
+	rawQuery   *string
 	vmVersion  *bool
 	compatInfo *bool
 	procReqs   *bool
@@ -298,6 +299,7 @@ func (c *propsCommand) Description() string { return "Lists compute system prope
 func (c *propsCommand) ArgHelp() string     { return "" }
 func (c *propsCommand) SetupFlags(fs *flag.FlagSet) {
 	setupCommonFlags(&c.cf, fs)
+	c.rawQuery = fs.String("rawquery", "", "Exact query string to use.")
 	c.vmVersion = fs.Bool("vmversion", false, "Query for VmVersion property as well.")
 	c.compatInfo = fs.Bool("compatinfo", false, "Query for CompatibilityInfo property as well.")
 	c.procReqs = fs.Bool("procreqs", false, "Query for VmProcessorRequirements as well.")
@@ -308,76 +310,49 @@ func (c *propsCommand) Execute(state *state, fs *flag.FlagSet) error {
 	if err != nil {
 		return err
 	}
-	pq := hcsschema.PropertyQuery{
-		Queries: map[string]interface{}{
-			"Basic": nil,
-		},
-	}
-	if *c.vmVersion {
-		pq.Queries["VmVersion"] = nil
-	}
-	if *c.compatInfo {
-		pq.Queries["CompatibilityInfo"] = nil
-	}
-	if *c.procReqs {
-		pq.Queries["VmProcessorRequirements"] = nil
-	}
-	j, err := json.Marshal(pq)
-	if err != nil {
-		return err
+	var query string
+	if c.rawQuery != nil {
+		query = *c.rawQuery
+	} else {
+		pq := hcsschema.PropertyQuery{
+			Queries: map[string]interface{}{
+				"Basic": nil,
+			},
+		}
+		if *c.vmVersion {
+			pq.Queries["VmVersion"] = nil
+		}
+		if *c.compatInfo {
+			pq.Queries["CompatibilityInfo"] = nil
+		}
+		if *c.procReqs {
+			pq.Queries["VmProcessorRequirements"] = nil
+		}
+		j, err := json.Marshal(pq)
+		if err != nil {
+			return err
+		}
+		query = string(j)
 	}
 	op := computecore.NewOperation(0)
 	defer op.Close()
-	if err := computecore.HcsGetComputeSystemProperties(cs.handle, op, string(j)); err != nil {
+	if err := computecore.HcsGetComputeSystemProperties(cs.handle, op, query); err != nil {
 		return err
 	}
 	properties, err := op.WaitResult(windows.INFINITE)
 	if err != nil {
 		return err
 	}
-	var props struct {
-		PropertyResponses struct {
-			Basic struct {
-				Response struct {
-					State     string
-					RuntimeId string
-				}
-			}
-			VmVersion struct {
-				Response struct {
-					Major uint
-					Minor uint
-				}
-			}
-			CompatibilityInfo struct {
-				Response struct {
-					Data string
-				}
-			}
-			VmProcessorRequirements struct {
-				Response json.RawMessage
-			}
-		}
-	}
-	if err := json.Unmarshal([]byte(properties), &props); err != nil {
+	var results any
+	if err := json.Unmarshal([]byte(properties), &results); err != nil {
 		return err
 	}
-	fmt.Printf("State: %s\n", props.PropertyResponses.Basic.Response.State)
-	fmt.Printf("RuntimeID: %s\n", props.PropertyResponses.Basic.Response.RuntimeId)
-	if *c.vmVersion {
-		fmt.Printf("VmVersion: %d.%d\n", props.PropertyResponses.VmVersion.Response.Major, props.PropertyResponses.VmVersion.Response.Minor)
+	resultsStr, err := json.MarshalIndent(results, "", "\t")
+	if err != nil {
+		return err
 	}
-	if *c.compatInfo {
-		fmt.Printf("CompatibilityInfo: %s\n", props.PropertyResponses.CompatibilityInfo.Response.Data)
-	}
-	if *c.procReqs {
-		fmt.Printf("VmProcessorRequirements:\n")
-		j, err = json.MarshalIndent(props.PropertyResponses.VmProcessorRequirements.Response, "\t", "\t")
-		if err != nil {
-			return err
-		}
-		fmt.Printf("\t%s\n", string(j))
-	}
+	fmt.Printf("%s\n", string(resultsStr))
+
 	return nil
 }
 
@@ -485,7 +460,7 @@ func (c *openCommand) Execute(state *state, fs *flag.FlagSet) error {
 		return fmt.Errorf("compute system already open: %s", id)
 	}
 	var cs cs
-	if err := computecore.HcsOpenComputeSystem(id, 0, &cs.handle); err != nil {
+	if err := computecore.HcsOpenComputeSystem(id, windows.GENERIC_ALL, &cs.handle); err != nil {
 		return err
 	}
 	state.systems[id] = &cs
@@ -516,38 +491,11 @@ func (c *svcPropsCommand) Execute(state *state, fs *flag.FlagSet) error {
 	if err := computecore.HcsGetServiceProperties(string(j), &properties); err != nil {
 		return err
 	}
-	var props struct {
-		PropertyResponses struct {
-			Basic struct {
-				Response struct {
-					SupportedSchemaVersions []struct {
-						Major uint
-						Minor uint
-					}
-				}
-			}
-			ProcessorCapabilities struct {
-				Response json.RawMessage
-			}
-		}
-	}
-	if err := json.Unmarshal([]byte(windows.UTF16PtrToString(properties)), &props); err != nil {
-		return err
-	}
-	fmt.Printf("Supported schema versions: ")
-	for i, sv := range props.PropertyResponses.Basic.Response.SupportedSchemaVersions {
-		if i != 0 {
-			fmt.Printf(", ")
-		}
-		fmt.Printf("%d.%d", sv.Major, sv.Minor)
-	}
-	fmt.Printf("\n")
-	fmt.Printf("ProcessorCapabilities:\n")
-	j, err = json.MarshalIndent(props.PropertyResponses.ProcessorCapabilities.Response, "\t", "\t")
+	j, err = json.MarshalIndent(json.RawMessage(windows.UTF16PtrToString(properties)), "\t", "\t")
 	if err != nil {
 		return err
 	}
-	fmt.Printf("\t%s\n", string(j))
+	fmt.Printf("Properties:\n\t%s\n", string(j))
 	return nil
 }
 
