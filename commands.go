@@ -467,31 +467,41 @@ func (c *openCommand) Execute(state *state, fs *flag.FlagSet) error {
 	return nil
 }
 
-type svcPropsCommand struct{}
+type svcPropsCommand struct {
+	rawQuery *string
+}
 
-func (c *svcPropsCommand) Name() string                { return "svcprops" }
-func (c *svcPropsCommand) Description() string         { return "Lists HCS service properties." }
-func (c *svcPropsCommand) ArgHelp() string             { return "" }
-func (c *svcPropsCommand) SetupFlags(fs *flag.FlagSet) {}
+func (c *svcPropsCommand) Name() string        { return "svcprops" }
+func (c *svcPropsCommand) Description() string { return "Lists HCS service properties." }
+func (c *svcPropsCommand) ArgHelp() string     { return "" }
+func (c *svcPropsCommand) SetupFlags(fs *flag.FlagSet) {
+	c.rawQuery = fs.String("rawquery", "", "Exact query string to use.")
+}
 
 func (c *svcPropsCommand) Execute(state *state, fs *flag.FlagSet) error {
-	pq := struct {
-		PropertyQueries map[string]any
-	}{
-		PropertyQueries: map[string]any{
-			"Basic":                 nil,
-			"ProcessorCapabilities": nil,
-		},
-	}
-	j, err := json.Marshal(pq)
-	if err != nil {
-		return err
+	var query string
+	if c.rawQuery != nil {
+		query = *c.rawQuery
+	} else {
+		pq := struct {
+			PropertyQueries map[string]any
+		}{
+			PropertyQueries: map[string]any{
+				"Basic":                 nil,
+				"ProcessorCapabilities": nil,
+			},
+		}
+		j, err := json.Marshal(pq)
+		if err != nil {
+			return err
+		}
+		query = string(j)
 	}
 	var properties *uint16
-	if err := computecore.HcsGetServiceProperties(string(j), &properties); err != nil {
+	if err := computecore.HcsGetServiceProperties(query, &properties); err != nil {
 		return err
 	}
-	j, err = json.MarshalIndent(json.RawMessage(windows.UTF16PtrToString(properties)), "\t", "\t")
+	j, err := json.MarshalIndent(json.RawMessage(windows.UTF16PtrToString(properties)), "\t", "\t")
 	if err != nil {
 		return err
 	}
